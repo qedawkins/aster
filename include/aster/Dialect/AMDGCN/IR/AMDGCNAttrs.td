@@ -253,4 +253,27 @@ def KernelArgumentsAttr
   }];
 }
 
+//===----------------------------------------------------------------------===//
+// ThreadScopeAttr
+//===----------------------------------------------------------------------===//
+
+/// Thread-level parallel execution scope for PCF.
+def ThreadScopeAttr : AMDGCN_Attr<"ThreadScope", "thread"> {
+  let summary = "Thread-level parallel execution scope.";
+  let description = [{
+    Represents the full set of threads within a workgroup. This scope provides
+    two levels of IDs (fastest to slowest varying):
+    - lane_id: `gpu.thread_id x mod 64`
+    - subgroup_id: `gpu.thread_id x floordiv 64`
+
+    And corresponding counts:
+    - lane_count: `64` (constant)
+    - subgroup_count: `gpu.block_dim x / 64`
+
+    When a single ID is requested, the flat `gpu.thread_id x` is returned.
+
+    The `ScopeAttrInterface` is attached via external model registration.
+  }];
+}
+
 #endif // ASTER_AMDGCN_ATTRS_TD

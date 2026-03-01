@@ -20,6 +20,8 @@ add_mlir_library(ASTERInit
   AsterUtilsDialect
   AsterUtilsTransforms
   LSIRDialect
+  PCFDialect
+  PCFTransforms
   MLIRAffineDialect
   MLIRAffineTransforms
   MLIRArithDialect

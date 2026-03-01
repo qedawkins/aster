@@ -11,10 +11,12 @@
 #include "aster/Init.h"
 #include "aster/CodeGen/Passes.h"
 #include "aster/Dialect/AMDGCN/IR/AMDGCNDialect.h"
+#include "aster/Dialect/AMDGCN/IR/AMDGCNScopeModels.h"
 #include "aster/Dialect/AMDGCN/Transforms/Passes.h"
 #include "aster/Dialect/AsterUtils/IR/AsterUtilsDialect.h"
 #include "aster/Dialect/AsterUtils/Transforms/Passes.h"
 #include "aster/Dialect/LSIR/IR/LSIRDialect.h"
+#include "iree/compiler/Codegen/Dialect/PCF/IR/PCFDialect.h"
 #include "aster/Interfaces/UpstreamExternalModels.h"
 #include "aster/Transforms/Passes.h"
 #include "mlir/CAPI/IR.h"
@@ -45,6 +47,11 @@
 #include "mlir/Transforms/Passes.h"
 
 using namespace mlir;
+
+// Forward declaration for PCF pass registration (defined in third_party/).
+namespace mlir::aster {
+void registerPCFPasses();
+} // namespace mlir::aster
 
 ///
 /// Upstream MLIR C++ stuff
@@ -379,7 +386,9 @@ void mlir::aster::initDialects(DialectRegistry &registry) {
   registry.insert<amdgcn::AMDGCNDialect>();
   registry.insert<lsir::LSIRDialect>();
   registry.insert<aster_utils::AsterUtilsDialect>();
+  registry.insert<iree_compiler::IREE::PCF::PCFDialect>();
   registerUpstreamExternalModels(registry);
+  amdgcn::registerAMDGCNScopeExternalModels(registry);
 }
 
 void mlir::aster::registerPasses() {
@@ -388,6 +397,7 @@ void mlir::aster::registerPasses() {
   aster_utils::registerAsterUtilsPasses();
   aster::registerAsterPasses();
   aster::registerCodeGenPasses();
+  aster::registerPCFPasses();
 }
 
 ///

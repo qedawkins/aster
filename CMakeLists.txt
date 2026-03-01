@@ -128,6 +128,14 @@ else()
 endif()
 add_compile_definitions(ASTER_ENABLE_TARGET=${ASTER_ENABLE_TARGET})
 
+# IREE submodule include paths: resolve #include "iree/compiler/..." for both
+# source headers and generated .inc files.
+set(IREE_COMPILER_SRC_ROOT ${CMAKE_SOURCE_DIR}/third_party/iree/compiler/src)
+set(IREE_PCF_GEN_ROOT ${CMAKE_BINARY_DIR}/third_party/gen)
+include_directories(${IREE_COMPILER_SRC_ROOT})
+include_directories(${IREE_PCF_GEN_ROOT})
+
+add_subdirectory(third_party)
 add_subdirectory(include)
 add_subdirectory(lib)
 add_subdirectory(tools)

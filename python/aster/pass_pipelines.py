@@ -45,6 +45,14 @@ def amdgcn_kernel(*args):
 
 # fmt: off
 
+# Lower PCF parallel ops (pcf.generic/loop) to SCF/CF before further lowering.
+# Must run before inlining since pcf.generic bodies reference scope-provided IDs.
+PHASE_PCF_LOWERING = (
+    "pcf-lower-structural-pcf",
+    "aster-inline-execute-region",
+    "canonicalize", "cse",
+)
+
 # Pre-scheduling cleanup, main purpose is to remove all included libraries that
 # are not needed for a particular kernel.
 PHASE_PRE_SCHEDULING_CLEANUP = (
@@ -243,6 +251,7 @@ TEST_LOOP_PASS_PIPELINE = builtin_module(
 # Loop pipelining pass pipeline
 def test_scf_pipelining_pass_pipeline(gcd_unroll=False):
     return builtin_module(
+        PHASE_PCF_LOWERING,
         PHASE_PRE_SCHEDULING_CLEANUP,
         phase_scf_pipelining(gcd_unroll=gcd_unroll),
         "aster-destructure-struct-iter-args", "canonicalize", "cse",
