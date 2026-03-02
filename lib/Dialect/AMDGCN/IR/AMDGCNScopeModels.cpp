@@ -50,13 +50,18 @@ public:
 
 /// External model implementing ScopeAttrInterface for ThreadScopeAttr.
 ///
-/// Provides two levels of thread IDs (fastest to slowest varying):
+/// Without a subgroup grid, provides two levels of thread IDs:
 ///   - lane_id:     gpu.thread_id x mod 64
 ///   - subgroup_id: gpu.thread_id x floordiv 64
 ///
-/// And corresponding counts:
-///   - lane_count:     64 (constant)
-///   - subgroup_count: gpu.block_dim x / 64
+/// With a subgroup grid (e.g., [2, 2]), the subgroup_id is delinearized
+/// into multiple dimensions following affine.delinearize_index semantics
+/// (outermost dimension first):
+///   - lane_id:   gpu.thread_id x mod 64
+///   - grid_id_0: subgroup_id / product(grid[1:])   (outermost)
+///   - grid_id_1: (subgroup_id / product(grid[2:])) % grid[1]
+///   - ...
+///   - grid_id_N: subgroup_id % grid[N]             (innermost)
 ///
 /// When a single ID is requested, the flat gpu.thread_id x is returned.
 struct ThreadScopeModel
@@ -65,22 +70,39 @@ struct ThreadScopeModel
   SmallVector<Value> getWorkerCounts(Attribute attr, OpBuilder &builder,
                                      Location loc, int64_t numIds) const {
     assert(numIds >= 1 && "expected at least one requested worker count");
+    ArrayRef<int64_t> grid = cast<ThreadScopeAttr>(attr).getSubgroupGrid();
     SmallVector<Value> counts(numIds, Value());
 
     if (numIds == 1) {
       // Single ID: total thread count = gpu.block_dim x.
       counts.front() =
           gpu::BlockDimOp::create(builder, loc, gpu::Dimension::x);
-    } else {
-      // Two or more IDs: fastest = 64 (lanes), next = block_dim_x / 64.
-      Value laneCount =
-          arith::ConstantIndexOp::create(builder, loc, kLanesPerSubgroup);
-      counts[0] = laneCount;
+      return counts;
+    }
 
+    // Lane count is always 64.
+    counts[0] =
+        arith::ConstantIndexOp::create(builder, loc, kLanesPerSubgroup);
+
+    if (!grid.empty()) {
+      // Grid-based counts: each grid dimension becomes a static count.
+      int64_t gridSize = static_cast<int64_t>(grid.size());
+      int64_t numGridIds = std::min(numIds - 1, gridSize);
+      for (int64_t i = 0; i < numGridIds; ++i) {
+        counts[1 + i] = arith::ConstantIndexOp::create(builder, loc, grid[i]);
+      }
+      // Pad remaining counts with 1.
+      if (1 + numGridIds < numIds) {
+        Value one = arith::ConstantIndexOp::create(builder, loc, 1);
+        for (int64_t i = 1 + numGridIds; i < numIds; ++i) {
+          counts[i] = one;
+        }
+      }
+    } else {
+      // No grid: subgroup_count = block_dim_x / 64.
       Value blockDim =
           gpu::BlockDimOp::create(builder, loc, gpu::Dimension::x);
-      counts[1] = arith::DivUIOp::create(builder, loc, blockDim, laneCount);
-
+      counts[1] = arith::DivUIOp::create(builder, loc, blockDim, counts[0]);
       // Pad remaining counts with 1.
       if (numIds > 2) {
         Value one = arith::ConstantIndexOp::create(builder, loc, 1);
@@ -96,6 +118,7 @@ struct ThreadScopeModel
   SmallVector<Value> getWorkerIDs(Attribute attr, OpBuilder &builder,
                                   Location loc, int64_t numIds) const {
     assert(numIds >= 1 && "expected at least one requested worker id");
+    ArrayRef<int64_t> grid = cast<ThreadScopeAttr>(attr).getSubgroupGrid();
     SmallVector<Value> ids(numIds, Value());
 
     Value threadId =
@@ -104,16 +127,61 @@ struct ThreadScopeModel
     if (numIds == 1) {
       // Single ID: flat thread id.
       ids.front() = threadId;
-    } else {
-      // Two or more IDs: fastest = lane_id, next = subgroup_id.
-      Value lanesPerSubgroup =
-          arith::ConstantIndexOp::create(builder, loc, kLanesPerSubgroup);
-      // lane_id = thread_id % 64.
-      ids[0] = arith::RemUIOp::create(builder, loc, threadId, lanesPerSubgroup);
-      // subgroup_id = thread_id / 64.
-      ids[1] =
-          arith::DivUIOp::create(builder, loc, threadId, lanesPerSubgroup);
+      return ids;
+    }
 
+    // lane_id = thread_id % 64.
+    Value lanesPerSubgroup =
+        arith::ConstantIndexOp::create(builder, loc, kLanesPerSubgroup);
+    ids[0] = arith::RemUIOp::create(builder, loc, threadId, lanesPerSubgroup);
+
+    // subgroup_id = thread_id / 64.
+    Value subgroupId =
+        arith::DivUIOp::create(builder, loc, threadId, lanesPerSubgroup);
+
+    if (!grid.empty()) {
+      // Delinearize subgroup_id by the grid (outermost-first convention).
+      // For grid = [D0, D1, ..., DN]:
+      //   id_0 = subgroup_id / (D1 * D2 * ... * DN)
+      //   id_1 = (subgroup_id / (D2 * ... * DN)) % D1
+      //   ...
+      //   id_N = subgroup_id % DN
+      int64_t gridSize = static_cast<int64_t>(grid.size());
+      int64_t numGridIds = std::min(numIds - 1, gridSize);
+
+      // Compute suffix products: suffixProd[i] = grid[i+1] * ... * grid[N-1].
+      SmallVector<int64_t> suffixProd(gridSize, 1);
+      for (int64_t i = gridSize - 2; i >= 0; --i) {
+        suffixProd[i] = suffixProd[i + 1] * grid[i + 1];
+      }
+
+      for (int64_t i = 0; i < numGridIds; ++i) {
+        Value current = subgroupId;
+        // Divide by suffix product to get the quotient for this dim.
+        if (suffixProd[i] > 1) {
+          Value divisor =
+              arith::ConstantIndexOp::create(builder, loc, suffixProd[i]);
+          current = arith::DivUIOp::create(builder, loc, current, divisor);
+        }
+        // Take modulo of the grid dimension (except for the outermost dim).
+        if (i > 0) {
+          Value modulus =
+              arith::ConstantIndexOp::create(builder, loc, grid[i]);
+          current = arith::RemUIOp::create(builder, loc, current, modulus);
+        }
+        ids[1 + i] = current;
+      }
+
+      // Pad remaining ids with 0.
+      if (numIds > 1 + numGridIds) {
+        Value zero = arith::ConstantIndexOp::create(builder, loc, 0);
+        for (int64_t i = 1 + numGridIds; i < numIds; ++i) {
+          ids[i] = zero;
+        }
+      }
+    } else {
+      // No grid: single subgroup_id.
+      ids[1] = subgroupId;
       // Pad remaining ids with 0.
       if (numIds > 2) {
         Value zero = arith::ConstantIndexOp::create(builder, loc, 0);

@@ -284,5 +284,50 @@ amdgcn::detail::InstAttrStorage::construct(AttributeStorageAllocator &allocator,
       InstAttrStorage(getMetadataForOpCode(allocator, key));
 }
 
+//===----------------------------------------------------------------------===//
+// ThreadScopeAttr
+//===----------------------------------------------------------------------===//
+
+Attribute ThreadScopeAttr::parse(AsmParser &parser, Type odsType) {
+  SmallVector<int64_t> grid;
+  // Parse optional `<[d0, d1, ...]>`.
+  if (succeeded(parser.parseOptionalLess())) {
+    if (parser.parseLSquare()) {
+      return {};
+    }
+    if (failed(parser.parseOptionalRSquare())) {
+      // Parse comma-separated integers.
+      int64_t dim = 0;
+      if (parser.parseInteger(dim)) {
+        return {};
+      }
+      grid.push_back(dim);
+      while (succeeded(parser.parseOptionalComma())) {
+        if (parser.parseInteger(dim)) {
+          return {};
+        }
+        grid.push_back(dim);
+      }
+      if (parser.parseRSquare()) {
+        return {};
+      }
+    }
+    if (parser.parseGreater()) {
+      return {};
+    }
+  }
+  return ThreadScopeAttr::get(parser.getContext(), grid);
+}
+
+void ThreadScopeAttr::print(AsmPrinter &printer) const {
+  ArrayRef<int64_t> grid = getSubgroupGrid();
+  if (grid.empty()) {
+    return;
+  }
+  printer << "<[";
+  llvm::interleaveComma(grid, printer);
+  printer << "]>";
+}
+
 #define GET_ATTRDEF_CLASSES
 #include "aster/Dialect/AMDGCN/IR/AMDGCNAttrs.cpp.inc"

@@ -261,19 +261,35 @@ def KernelArgumentsAttr
 def ThreadScopeAttr : AMDGCN_Attr<"ThreadScope", "thread"> {
   let summary = "Thread-level parallel execution scope.";
   let description = [{
-    Represents the full set of threads within a workgroup. This scope provides
-    two levels of IDs (fastest to slowest varying):
+    Represents the full set of threads within a workgroup. The optional
+    `subgroup_grid` parameter specifies how to delinearize the subgroup ID
+    into multiple dimensions (outermost-first, matching tensor shape
+    convention).
+
+    Without a grid (or with a 1-element grid), this scope provides two
+    levels of IDs:
     - lane_id: `gpu.thread_id x mod 64`
     - subgroup_id: `gpu.thread_id x floordiv 64`
 
-    And corresponding counts:
-    - lane_count: `64` (constant)
-    - subgroup_count: `gpu.block_dim x / 64`
+    With a grid (e.g., `[2, 2]`), the subgroup ID is delinearized into
+    multiple IDs following `affine.delinearize_index` semantics:
+    - lane_id: `gpu.thread_id x mod 64`
+    - grid_id_0: outermost dimension (slowest varying)
+    - grid_id_1: next dimension
+    - ...
+    - grid_id_N: innermost dimension (fastest varying)
 
-    When a single ID is requested, the flat `gpu.thread_id x` is returned.
+    Examples:
+    - `#amdgcn.thread`        — lane_id + subgroup_id
+    - `#amdgcn.thread<[2]>`   — lane_id + subgroup_id (1D grid)
+    - `#amdgcn.thread<[2,2]>` — lane_id + wave_m + wave_n (2x2 grid)
 
     The `ScopeAttrInterface` is attached via external model registration.
   }];
+  let parameters = (ins
+    OptionalArrayRefParameter<"int64_t", "subgroup grid dimensions">:$subgroupGrid
+  );
+  let hasCustomAssemblyFormat = 1;
 }
 
 #endif // ASTER_AMDGCN_ATTRS_TD
