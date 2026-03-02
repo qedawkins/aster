@@ -75,14 +75,12 @@ struct ThreadScopeModel
 
     if (numIds == 1) {
       // Single ID: total thread count = gpu.block_dim x.
-      counts.front() =
-          gpu::BlockDimOp::create(builder, loc, gpu::Dimension::x);
+      counts.front() = gpu::BlockDimOp::create(builder, loc, gpu::Dimension::x);
       return counts;
     }
 
     // Lane count is always 64.
-    counts[0] =
-        arith::ConstantIndexOp::create(builder, loc, kLanesPerSubgroup);
+    counts[0] = arith::ConstantIndexOp::create(builder, loc, kLanesPerSubgroup);
 
     if (!grid.empty()) {
       // Grid-based counts: each grid dimension becomes a static count.
@@ -100,8 +98,7 @@ struct ThreadScopeModel
       }
     } else {
       // No grid: subgroup_count = block_dim_x / 64.
-      Value blockDim =
-          gpu::BlockDimOp::create(builder, loc, gpu::Dimension::x);
+      Value blockDim = gpu::BlockDimOp::create(builder, loc, gpu::Dimension::x);
       counts[1] = arith::DivUIOp::create(builder, loc, blockDim, counts[0]);
       // Pad remaining counts with 1.
       if (numIds > 2) {
@@ -121,8 +118,7 @@ struct ThreadScopeModel
     ArrayRef<int64_t> grid = cast<ThreadScopeAttr>(attr).getSubgroupGrid();
     SmallVector<Value> ids(numIds, Value());
 
-    Value threadId =
-        gpu::ThreadIdOp::create(builder, loc, gpu::Dimension::x);
+    Value threadId = gpu::ThreadIdOp::create(builder, loc, gpu::Dimension::x);
 
     if (numIds == 1) {
       // Single ID: flat thread id.
@@ -165,8 +161,7 @@ struct ThreadScopeModel
         }
         // Take modulo of the grid dimension (except for the outermost dim).
         if (i > 0) {
-          Value modulus =
-              arith::ConstantIndexOp::create(builder, loc, grid[i]);
+          Value modulus = arith::ConstantIndexOp::create(builder, loc, grid[i]);
           current = arith::RemUIOp::create(builder, loc, current, modulus);
         }
         ids[1 + i] = current;
